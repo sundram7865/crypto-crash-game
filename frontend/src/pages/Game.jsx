@@ -7,6 +7,7 @@ const socket = io('http://localhost:3000');
 export default function Game() {
   const [multiplier, setMultiplier] = useState(1.0);
   const [betAmount, setBetAmount] = useState(10);
+  const [currency, setCurrency] = useState('BTC');
   const [isBetting, setIsBetting] = useState(false);
   const [bets, setBets] = useState([]);
   const [crashPoint, setCrashPoint] = useState(null);
@@ -43,7 +44,7 @@ export default function Game() {
   const handlePlaceBet = async () => {
     const token = await getToken();
     socket.auth = { token };
-    socket.emit('place_bet', { amount: betAmount, currency: 'BTC' }); // Assuming crypto bet
+    socket.emit('place_bet', { amount: betAmount, currency });
     setIsBetting(true);
   };
 
@@ -83,7 +84,18 @@ export default function Game() {
 
         {/* Right: Bet Panel */}
         <div className="bg-gray-900 rounded-xl p-4 flex flex-col items-center gap-4">
-          <h2 className="text-lg font-semibold">Place Your Bet (USD)</h2>
+          <h2 className="text-lg font-semibold">Place Your Bet</h2>
+
+          {/* Currency Selection */}
+          <select
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value)}
+            className="w-full text-black p-2 rounded mb-2"
+          >
+            <option value="BTC">Bitcoin (BTC)</option>
+            <option value="ETH">Ethereum (ETH)</option>
+          </select>
+
           <div className="flex items-center gap-2">
             <button onClick={() => setBetAmount(betAmount - 1)} className="px-2 py-1 bg-gray-700 rounded">-</button>
             <input
@@ -94,13 +106,15 @@ export default function Game() {
             />
             <button onClick={() => setBetAmount(betAmount + 1)} className="px-2 py-1 bg-gray-700 rounded">+</button>
           </div>
+
           <button
             onClick={handlePlaceBet}
             disabled={isBetting}
             className="w-full py-2 bg-green-500 rounded text-black font-bold text-lg"
           >
-            Bet ${betAmount}
+            Bet ${betAmount} in {currency}
           </button>
+
           <button
             onClick={handleCashout}
             disabled={!isBetting}
