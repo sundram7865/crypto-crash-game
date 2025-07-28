@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import io from 'socket.io-client';
 import { useAuth } from '@clerk/clerk-react';
+import { fetchWallet } from '../lib/wallet.js';
 
 const socket = io('http://localhost:3000');
 
@@ -11,8 +12,20 @@ export default function Game() {
   const [isBetting, setIsBetting] = useState(false);
   const [bets, setBets] = useState([]);
   const [crashPoint, setCrashPoint] = useState(null);
+  const [wallet, setWallet] = useState(null);
 
   const { getToken } = useAuth();
+
+  const planePosition = Math.min(multiplier * 10, 100); // cap at 100vw
+
+  useEffect(() => {
+    const loadWallet = async () => {
+      const token = await getToken();
+      const data = await fetchWallet(token);
+      setWallet(data);
+    };
+    loadWallet();
+  }, [getToken]);
 
   useEffect(() => {
     socket.on('multiplier_update', (value) => {
@@ -53,9 +66,23 @@ export default function Game() {
     setIsBetting(false);
   };
 
+  const getCryptoEquivalent = () => {
+    if (!wallet || !wallet.USD || !wallet.USD[currency]) return '...';
+    const price = wallet.USD[currency];
+    return (betAmount / price).toFixed(6);
+  };
+
   return (
     <div className="min-h-screen bg-black text-white p-4">
       <header className="text-red-500 text-4xl font-bold text-center mb-4">Crypto Crash</header>
+
+      {/* Wallet Info */}
+      {wallet && (
+        <div className="mb-4 bg-gray-800 p-4 rounded-xl text-sm flex flex-col md:flex-row md:justify-center gap-4 text-center">
+          <div>BTC: {wallet.BTC} (${wallet.USD.BTC})</div>
+          <div>ETH: {wallet.ETH} (${wallet.USD.ETH})</div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Left: Bets List */}
@@ -74,12 +101,19 @@ export default function Game() {
         </div>
 
         {/* Center: Game Display */}
-        <div className="bg-gradient-to-br from-black to-gray-900 rounded-xl flex flex-col items-center justify-center p-6 relative">
+        <div className="bg-gradient-to-br from-black to-gray-900 rounded-xl flex flex-col items-center justify-center p-6 relative overflow-hidden">
           <div className="text-6xl font-bold text-green-400 mb-4">{multiplier.toFixed(2)}x</div>
           {crashPoint && (
             <div className="text-red-500 text-xl absolute bottom-6">Crashed at: {crashPoint}x</div>
           )}
-          <div className="absolute right-10 bottom-10 text-4xl">✈️</div>
+
+          {/* Animated Plane */}
+          <div
+            className="absolute bottom-10 text-4xl transition-transform duration-100 ease-out"
+            style={{ transform: `translateX(${planePosition}vw)` }}
+          >
+            ✈️
+          </div>
         </div>
 
         {/* Right: Bet Panel */}
@@ -106,6 +140,8 @@ export default function Game() {
             />
             <button onClick={() => setBetAmount(betAmount + 1)} className="px-2 py-1 bg-gray-700 rounded">+</button>
           </div>
+
+          <div className="text-sm text-gray-300">≈ {getCryptoEquivalent()} {currency}</div>
 
           <button
             onClick={handlePlaceBet}
