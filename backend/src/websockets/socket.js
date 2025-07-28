@@ -1,30 +1,34 @@
 import { generateCrashPoint } from '../utils/crashAlgo.js';
-import { verifyToken } from '@clerk/clerk-sdk-node';
-import { getUserWallet, updateWallet } from '../services/walletService.js';
+import { getUserWallet, updateUserWallet, syncUser } from '../services/walletService.js';
 import { getCryptoPrices } from '../services/priceService.js';
 
 let roundId = 1;
 let currentMultiplier = 1.0;
-let activeBets = {}; // { userId: { ...bet } }
+let activeBets = {}; // socket.id -> bet
 
 export function handleSockets(io) {
   io.use(async (socket, next) => {
     try {
-      const token = socket.handshake.auth.token;
-      const user = await verifyToken(token);
+      const playerName = `Player${Math.floor(1000 + Math.random() * 9000)}`;
+      const userId = socket.id;
+
+      // Auto-create user with initial wallet
+      await syncUser(userId, playerName);
+
       socket.user = {
-        id: user.sub,
-        username: user.username || user.email_addresses?.[0]?.email_address || 'Player'
+        id: userId,
+        username: playerName
       };
       next();
     } catch (err) {
-      next(new Error('Unauthorized'));
+      next(new Error('Failed to initialize user'));
     }
   });
 
   io.on('connection', (socket) => {
-    console.log(`🔌 ${socket.user.id} connected`);
+    console.log(`🔌 ${socket.user.username} connected`);
 
+    // 📌 Place Bet
     socket.on('place_bet', async ({ amount, currency }) => {
       const userId = socket.user.id;
       const username = socket.user.username;
@@ -34,13 +38,13 @@ export function handleSockets(io) {
         const usdPrice = prices[currency];
         const cryptoAmount = amount / usdPrice;
 
-        const wallet = await getUserWallet(userId);
+        const wallet = await getUserWallet(userId, prices);
         if (!wallet[currency] || wallet[currency] < cryptoAmount) {
-          return; // Insufficient balance
+          console.log('❌ Insufficient balance for', username);
+          return;
         }
 
-        // Deduct from wallet (simulate)
-        await updateWallet(userId, currency, -cryptoAmount);
+        await updateUserWallet(userId, currency, -cryptoAmount);
 
         const bet = {
           player: username,
@@ -53,12 +57,14 @@ export function handleSockets(io) {
 
         activeBets[userId] = { ...bet, startMultiplier: currentMultiplier };
         io.emit('new_bet', bet);
-        console.log(`🎯 Bet from ${userId}: $${amount} in ${currency}`);
+
+        console.log(`🎯 ${username} bet $${amount} in ${currency}`);
       } catch (err) {
-        console.error('Error placing bet:', err);
+        console.error('❌ Error placing bet:', err.message);
       }
     });
 
+    // 📌 Cashout
     socket.on('cashout', async () => {
       const userId = socket.user.id;
       const bet = activeBets[userId];
@@ -67,17 +73,26 @@ export function handleSockets(io) {
       bet.status = 'cashed_out';
       bet.multiplier = currentMultiplier;
 
-      // Simulate cashout back to wallet
       const payout = bet.cryptoAmount * currentMultiplier;
-      await updateWallet(userId, bet.currency, payout);
+      await updateUserWallet(userId, bet.currency, payout);
 
-      io.emit('bet_cashout', bet);
+      io.emit('bet_cashout', {
+        ...bet,
+        player: socket.user.username,
+        cashoutAt: currentMultiplier
+      });
+
       delete activeBets[userId];
-      console.log(`💸 ${userId} cashed out at ${currentMultiplier}x`);
+      console.log(`💸 ${socket.user.username} cashed out at ${currentMultiplier}x`);
+    });
+
+    // 📌 Disconnect
+    socket.on('disconnect', () => {
+      delete activeBets[socket.user.id];
     });
   });
 
-  // 🔁 Game loop
+  // 🕹 Game Loop (runs every 10 seconds)
   setInterval(async () => {
     const seed = 'secret-seed';
     const crashPoint = generateCrashPoint(seed, roundId);
@@ -88,7 +103,7 @@ export function handleSockets(io) {
     const interval = setInterval(() => {
       if (currentMultiplier >= crashPoint) {
         io.emit('round_crash', crashPoint);
-        activeBets = {}; // clear all remaining active bets
+        activeBets = {};
         clearInterval(interval);
         roundId++;
       } else {

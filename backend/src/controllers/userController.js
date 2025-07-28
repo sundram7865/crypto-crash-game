@@ -1,29 +1,38 @@
 import User from '../models/User.js';
 
 /**
- * Syncs a Clerk-authenticated user with your local MongoDB
- * @param {string} userId - Clerk user ID
- * @param {string} username - Optional username (can be from Clerk metadata)
+ * Sync or create a user using socket.id or custom user ID.
+ * @param {string} userId - A unique identifier (e.g., socket.id)
+ * @param {string} username - Optional username like "Player3029"
  * @returns {Promise<User>}
  */
 export async function syncUser(userId, username = 'anonymous') {
   let user = await User.findById(userId);
+
   if (!user) {
     user = new User({
       _id: userId,
       username,
       wallet: {
-        BTC: 0,
-        ETH: 0
+        BTC: 1.0,   // default BTC balance
+        ETH: 10.0   // default ETH balance
       }
     });
     await user.save();
   }
+
   return user;
 }
 
 /**
- * Get user wallet with crypto and USD equivalent
+ * Get wallet balance with real-time USD equivalents.
+ * @param {string} userId
+ * @param {{ BTC: number, ETH: number }} prices - Live crypto prices
+ * @returns {{
+ *   BTC: number,
+ *   ETH: number,
+ *   USD: { BTC: string, ETH: string }
+ * }}
  */
 export async function getUserWallet(userId, prices) {
   const user = await User.findById(userId);
@@ -40,7 +49,11 @@ export async function getUserWallet(userId, prices) {
 }
 
 /**
- * Add or subtract funds to/from user's wallet
+ * Update user's crypto wallet by delta.
+ * @param {string} userId
+ * @param {'BTC' | 'ETH'} currency
+ * @param {number} delta - positive or negative amount
+ * @returns {Promise<{ BTC: number, ETH: number }>}
  */
 export async function updateUserWallet(userId, currency, delta) {
   const user = await User.findById(userId);
@@ -50,12 +63,12 @@ export async function updateUserWallet(userId, currency, delta) {
     throw new Error('Unsupported currency');
   }
 
-  user.wallet[currency] += delta;
-
-  if (user.wallet[currency] < 0) {
+  const newBalance = user.wallet[currency] + delta;
+  if (newBalance < 0) {
     throw new Error('Insufficient funds');
   }
 
+  user.wallet[currency] = newBalance;
   await user.save();
   return user.wallet;
 }
